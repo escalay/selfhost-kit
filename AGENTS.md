@@ -7,6 +7,7 @@ The parts a self-hosted app needs around its own code, shared by Escalay's produ
 | Command | What |
 |---|---|
 | `updater/test/run.sh` | The updater end to end against real Docker (needs Docker; about 3 minutes) |
+| `updater/test/signatures.sh` | The image's own cosign against real published signatures (needs the network) |
 | `docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -s sh /mnt/updater/updater.sh` | Lint the script |
 
 ## Layout
@@ -26,5 +27,7 @@ The parts a self-hosted app needs around its own code, shared by Escalay's produ
 3. A failed update ends with the old compose file, the old version and the data from before, or says exactly what
    is left to do by hand.
 4. The `.env` and the owner's own compose files are never written.
-5. Every behaviour has a case in `updater/test/run.sh`; a change to the script comes with one.
+5. Every behaviour has a case in `updater/test/run.sh`; a change to the script comes with one. That test replaces
+   cosign, so `updater/test/signatures.sh` runs the image's real cosign, with the script's own flags, against a
+   published release: a change to cosign or to those flags must pass it.
 6. Released by the release workflow only. A running updater accepts its successor by that workflow's signature.

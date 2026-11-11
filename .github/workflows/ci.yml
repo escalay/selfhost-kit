@@ -1,5 +1,6 @@
 # Every change: the updater's script linted, the updater run end to end against real Docker (a good update, a failed
-# one that must roll back, the requests that must be refused), the workflows linted, and on pull requests the title.
+# one that must roll back, the requests that must be refused), its cosign held to real published signatures, the
+# workflows linted, and on pull requests the title.
 name: CI
 
 on:
@@ -28,6 +29,8 @@ jobs:
         run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -s sh /mnt/updater/updater.sh
       - name: The updater, end to end
         run: updater/test/run.sh
+      - name: Its cosign reads real signatures
+        run: updater/test/signatures.sh
 
   # The title becomes the squash commit, and so a line in the release notes
   title:
