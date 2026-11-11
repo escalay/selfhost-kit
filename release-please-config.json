@@ -1,0 +1,61 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "initial-version": "1.0.0",
+  "draft": true,
+  "force-tag-creation": true,
+  "always-update": true,
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "New"
+    },
+    {
+      "type": "fix",
+      "section": "Fixed"
+    },
+    {
+      "type": "perf",
+      "section": "Faster"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation"
+    },
+    {
+      "type": "revert",
+      "section": "Reverted"
+    },
+    {
+      "type": "refactor",
+      "section": "Refactored",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Chores",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI",
+      "hidden": true
+    }
+  ],
+  "packages": {
+    ".": {}
+  },
+  "pull-request-header": "Merging this pull request releases the version below: it is tagged, the updater image is built, tested, pushed and signed, and then the release is published.",
+  "pull-request-footer": "Edit nothing here by hand; it is rewritten whenever main changes."
+}

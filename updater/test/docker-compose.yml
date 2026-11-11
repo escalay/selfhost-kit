@@ -1,0 +1,38 @@
+# The test project: the stand-in app, the updater, and one server that is both the image registry and the releases
+name: updater-test
+services:
+  app:
+    image: ${APP_IMAGE:-localhost:5599/app:1.0.0} # the release this file came with
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - state:/state
+    restart: unless-stopped
+  releases:
+    image: busybox:1.37
+    command: httpd -f -p 80 -h /www
+    volumes:
+      - ./releases:/www/releases:ro
+    restart: unless-stopped
+  # Behind a profile, as an optional part of a product is (a proxy for HTTPS, say)
+  side:
+    image: busybox:1.37
+    profiles: [side]
+    command: sleep 1000000
+    restart: unless-stopped
+  updater:
+    image: updater:test
+    environment:
+      UPDATER_REPO: example/app
+      UPDATER_IMAGE: localhost:5599/app
+      UPDATER_RELEASES: http://releases/releases
+      UPDATER_TIMEOUT: "20"
+      UPDATER_POLL: "1"
+    volumes:
+      - state:/state
+      - .:/project
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+volumes:
+  state:

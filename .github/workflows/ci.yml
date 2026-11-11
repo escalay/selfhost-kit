@@ -1,0 +1,58 @@
+# Every change: the updater's script linted, the updater run end to end against real Docker (a good update, a failed
+# one that must roll back, the requests that must be refused), the workflows linted, and on pull requests the title.
+name: CI
+
+on:
+  pull_request:
+    # `edited` too: a changed title is checked again
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -s sh /mnt/updater/updater.sh
+      - name: The updater, end to end
+        run: updater/test/run.sh
+
+  # The title becomes the squash commit, and so a line in the release notes
+  title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: The pull request title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|docs|refactor|chore|test|build|ci|revert)(\([a-z0-9./-]+\))?!?: [^ ].*$'
+          if ! [[ "$TITLE" =~ $pattern ]]; then
+            echo "::error::The title \"$TITLE\" is not a Conventional Commit. It becomes the commit on main and a line in the release notes, e.g. \"fix(updater): keep the owner's override file\"."
+            exit 1
+          fi
+
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - name: zizmor
+        run: pipx run zizmor==1.32.0 --offline .github

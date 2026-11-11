@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for cosign in the tests: says yes unless the tests ask for a bad signature. Every call is noted.
+echo "$*" >> /state/cosign.calls
+[ ! -f /state/cosign.refuse ]

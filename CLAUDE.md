@@ -1,0 +1,3 @@
+# selfhost-kit
+
+@AGENTS.md
