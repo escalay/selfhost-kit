@@ -31,6 +31,10 @@ jobs:
         run: updater/test/run.sh
       - name: Its cosign reads real signatures
         run: updater/test/signatures.sh
+      - name: The updater built here updates to the last published example, nothing replaced
+        run: |
+          docker build -q -t updater:ci updater > /dev/null
+          UPDATER_UNDER_TEST=updater:ci updater/test/real.sh
 
   # The title becomes the squash commit, and so a line in the release notes
   title:
