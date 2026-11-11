@@ -8,6 +8,7 @@ The parts a self-hosted app needs around its own code, shared by Escalay's produ
 |---|---|
 | `updater/test/run.sh` | The updater end to end against real Docker (needs Docker; about 3 minutes) |
 | `updater/test/signatures.sh` | The image's own cosign against real published signatures (needs the network) |
+| `updater/test/real.sh` | The updater against a published release of the example, nothing replaced (needs the network) |
 | `docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -s sh /mnt/updater/updater.sh` | Lint the script |
 
 ## Layout
@@ -16,7 +17,8 @@ The parts a self-hosted app needs around its own code, shared by Escalay's produ
 |---|---|
 | `updater/updater.sh` | The whole updater: watch for a request, verify, start, wait, roll back, hand over |
 | `updater/README.md` | Its contract with an app: the files, the release's files, the state folder, the settings |
-| `updater/test/` | A stand-in app that keeps the contract, a compose project, and `run.sh`; only cosign is replaced |
+| `updater/test/` | A compose project and `run.sh` (only cosign is replaced), `signatures.sh` and `real.sh` (nothing is) |
+| `example/` | The smallest app that keeps the contract, with its compose file. Every release publishes it signed, as a product would publish itself, and the release is proven against it before and after it is out |
 
 ## Invariants
 

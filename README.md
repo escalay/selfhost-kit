@@ -41,10 +41,17 @@ volumes:
 signed script holds that access so that your app doesn't. [updater/README.md](updater/README.md) has the whole
 contract and what your release workflow has to publish.
 
+## Try it
+
+[example/](example/) is the smallest app that keeps the contract. Every release of this repository publishes it
+signed, the way your own release workflow would, and is proven against it.
+
 ## Develop
 
 ```sh
-updater/test/run.sh   # the updater end to end against real Docker: about 3 minutes
+updater/test/run.sh          # the updater end to end against real Docker: about 3 minutes
+updater/test/signatures.sh   # its cosign against real published signatures
+updater/test/real.sh         # the updater against a published release of the example, nothing replaced
 ```
 
 Releases come from the release workflow: merging the release pull request tags the version, tests, builds, pushes

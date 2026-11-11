@@ -1,8 +1,11 @@
 # On main: release-please keeps a release pull request open from the Conventional Commits since the last release.
 # Merging it tags vX.Y.Z and drafts the GitHub Release. This workflow then tests the updater end to end, builds its
 # image for amd64 and arm64, pushes it to GHCR as X.Y.Z, X.Y, X and latest, and signs it with cosign (keyless, by this
-# workflow's identity: a running updater accepts its successor only with that signature). The release is published
-# last. If the image job fails, re-run the failed job and it finishes the release.
+# workflow's identity: a running updater accepts its successor only with that signature). It then publishes the
+# example app (example/) the way a product publishes itself: a signed image, and a signed release.json and compose
+# file on the release. Before the release is published the new updater updates to that example with nothing replaced
+# (updater/test/real.sh), and once it is out a second job does the same from GitHub. If the image job fails, re-run
+# the failed job and it finishes the release.
 name: Release
 
 on:
@@ -18,6 +21,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/escalay/updater
+  EXAMPLE: ghcr.io/escalay/updater-example
 
 jobs:
   release-please:
@@ -102,7 +106,61 @@ jobs:
           cosign verify "${IMAGE}@${DIGEST}" \
             --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
-      - name: Publish the release
+
+      # The example app, published as a product would publish itself
+      - id: example
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: example/app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.EXAMPLE }}:${{ env.VERSION }}
+          build-args: VERSION=${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=The example app the updater's releases are proven against.
+            org.opencontainers.image.licenses=MIT
+      - name: Sign the example, and write its release files
+        env:
+          DIGEST: ${{ steps.example.outputs.digest }}
+        run: |
+          cosign sign --yes "${EXAMPLE}@${DIGEST}"
+          mkdir release
+          cp example/docker-compose.yml release/docker-compose.yml
+          jq -n --arg version "$VERSION" --arg image "${EXAMPLE}@${DIGEST}" \
+            --arg from "$(jq -r .upgradeFrom example/release.json)" \
+            --arg sha "$(sha256sum release/docker-compose.yml | cut -d' ' -f1)" \
+            '{version: $version, upgradeFrom: $from, image: $image, compose: {file: "docker-compose.yml", sha256: $sha}}' \
+            > release/release.json
+      - id: files
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+      - name: Update to the example for real, with the updater just built
+        env:
+          BUNDLE: ${{ steps.files.outputs.bundle-path }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cp "$BUNDLE" release/selfhost-kit.intoto.jsonl
+          chmod -R a+rX release
+          UPDATER_UNDER_TEST="${IMAGE}@${DIGEST}" updater/test/real.sh "$VERSION" "$PWD/release"
+      - name: Attach the example's files, then publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$TAG" --draft=false --latest
+        run: |
+          gh release upload "$TAG" release/* --clobber
+          gh release edit "$TAG" --draft=false --latest
+
+  # What anyone gets: the published updater, the published files, the published signatures
+  published:
+    needs: [release-please, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Update to the published example, from GitHub
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: updater/test/real.sh "$VERSION"

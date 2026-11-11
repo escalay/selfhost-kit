@@ -54,7 +54,14 @@
     }
   ],
   "packages": {
-    ".": {}
+    ".": {
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "example/docker-compose.yml"
+        }
+      ]
+    }
   },
   "pull-request-header": "Merging this pull request releases the version below: it is tagged, the updater image is built, tested, pushed and signed, and then the release is published.",
   "pull-request-footer": "Edit nothing here by hand; it is rewritten whenever main changes."

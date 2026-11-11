@@ -29,7 +29,7 @@ mkdir -p "$work/releases"
 # release VERSION UPGRADE_FROM [BROKEN]: builds and pushes the app, and writes the release's files
 release() {
   local version=$1 from=$2 broken=${3:-} dir="$work/releases/v$1" digest
-  docker build -q -t "localhost:5599/app:$version" --build-arg VERSION="$version" --build-arg BROKEN="$broken" "$here/app" >/dev/null
+  docker build -q -t "localhost:5599/app:$version" --build-arg VERSION="$version" --build-arg BROKEN="$broken" "$here/../../example/app" >/dev/null
   digest=$(docker push -q "localhost:5599/app:$version" | sed 's/.*@//; s/.*\(sha256:[0-9a-f]*\).*/\1/')
   case "$digest" in sha256:*) ;; *) digest=$(docker image inspect "localhost:5599/app:$version" --format '{{ index .RepoDigests 0 }}' | sed 's/.*@//') ;; esac
   mkdir -p "$dir"
