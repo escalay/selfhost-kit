@@ -4,12 +4,12 @@
 name: updater-example
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/escalay/updater-example:1.0.1} # x-release-please-version
+    image: ${APP_IMAGE:-ghcr.io/escalay/updater-example:1.1.0} # x-release-please-version
     volumes:
       - state:/state
     restart: unless-stopped
   updater:
-    image: ghcr.io/escalay/updater:1.0.1 # x-release-please-version
+    image: ghcr.io/escalay/updater:1.1.0 # x-release-please-version
     environment:
       UPDATER_REPO: escalay/selfhost-kit
       UPDATER_IMAGE: ghcr.io/escalay/updater-example
