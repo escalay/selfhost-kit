@@ -66,7 +66,7 @@ Only `release.json` needs the attestation: it names the image by digest and the 
 | `UPDATER_IMAGE` | required | The image releases are published as, without a tag |
 | `UPDATER_SERVICE` | `app` | The app's service in the compose file |
 | `UPDATER_HEALTH_URL` | `http://<service>/api/health` | Answers JSON with `version` |
-| `UPDATER_TIMEOUT` | `180` | Seconds the new version has to come up |
+| `UPDATER_TIMEOUT` | `180` | Seconds the new version has to come up. Starting it, health checks of what depends on it included, may take twice that |
 | `UPDATER_FRESH` | `60` | Minutes a request stays good. An older one is refused, so an updater that was away doesn't install what was asked for then |
 | `UPDATER_WORKFLOW` | `release.yml` | The workflow file that signs releases |
 | `UPDATER_DATABASE` | `state.sqlite` | The database file in the state folder |

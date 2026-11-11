@@ -76,7 +76,8 @@ compose_with() {
     set -- -f "$(echo "$FILES" | sed -n "${count}p")" "$@"
     count=$((count - 1))
   done
-  docker compose --project-name "$NAME" --project-directory "$HOST_DIR" -f "$first" "$@"
+  # LIMIT, when set, is the longest this may take: `up` waits on health checks, and must not wait for good
+  ${LIMIT:+timeout "$LIMIT"} docker compose --project-name "$NAME" --project-directory "$HOST_DIR" -f "$first" "$@"
 }
 compose() { compose_with "$HOST_DIR/$FILE" "$@"; }
 
@@ -146,7 +147,7 @@ rollback() {
   fi
   echo "$from" > "$STATE/version"
   # shellcheck disable=SC2046
-  compose up -d $(cat "$KEPT/services") > /dev/null 2>&1 || true
+  LIMIT=$((TIMEOUT * 2)) compose up -d $(cat "$KEPT/services") > /dev/null 2>&1 || true
   if answers "$from" "$TIMEOUT"; then
     finish failed 'rolled back' "$1 $from is running again with the data from before the update."
   else
@@ -190,7 +191,7 @@ update() {
   # Written through the file that is there, so it stays its owner's
   cat "$WORK/$file" > "$HOST_DIR/$FILE"
   # shellcheck disable=SC2046
-  if ! out=$(compose up -d $(cat "$KEPT/services") 2>&1); then
+  if ! out=$(LIMIT=$((TIMEOUT * 2)) compose up -d $(cat "$KEPT/services") 2>&1); then
     rollback "$to couldn't be started ($(echo "$out" | tail -n 1))."
     return
   fi
