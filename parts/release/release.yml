@@ -102,7 +102,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
       - name: Run the scanned image through the self-hosting path
-        run: scripts/smoke.sh
+        run: bash scripts/smoke.sh
         env:
           APP_IMAGE: app:scan
 

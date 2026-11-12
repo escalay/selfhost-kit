@@ -38,7 +38,7 @@ last=$(echo "$published" | tail -n 1)
 [ -n "$last" ] || { echo "upgrade: no published release to start from" >&2; exit 1; }
 if [ -z "${UPGRADE_FROM:-}" ] && [ "${UPGRADE_OLDER:-run}" = run ]; then
   for older in $(echo "$published" | sed '$d'); do
-    APP_IMAGE="$under_test" UPGRADE_FROM="$older" UPGRADE_LEGS=first "$0"
+    APP_IMAGE="$under_test" UPGRADE_FROM="$older" UPGRADE_LEGS=first bash "$0"
   done
 fi
 from="${UPGRADE_FROM:-$last}"

@@ -8,7 +8,7 @@ failed=0
 expect() {
   local name=$1 want=$2 event=$3 branch=$4 tested=$5 got
   shift 5
-  got=$(printf '%s\n' "$@" | EVENT="$event" BRANCH="$branch" TESTED="$tested" "$here/ci-plan.sh" | cut -d= -f2 | tr '\n' ' ')
+  got=$(printf '%s\n' "$@" | EVENT="$event" BRANCH="$branch" TESTED="$tested" bash "$here/ci-plan.sh" | cut -d= -f2 | tr '\n' ' ')
   if [ "${got% }" = "$want" ]; then echo "ok: $name"; else echo "FAIL: $name: wanted '$want', got '${got% }'"; failed=1; fi
 }
 t=$'\t'
