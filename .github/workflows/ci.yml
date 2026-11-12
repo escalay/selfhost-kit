@@ -54,7 +54,9 @@ jobs:
       - name: The upgrade test, against the example app
         run: |
           docker build -q -t updater-example:ci --build-arg VERSION=ci example/app > /dev/null
-          ROOT="$PWD" HOOKS="$PWD/parts/upgrade-test/upgrade-test.hooks.sh" APP_IMAGE=updater-example:ci bash parts/upgrade-test/upgrade-test.sh
+          # The updater of this tree: on a release's own pull request the one the example pins isn't published yet
+          docker build -q -t updater:ci updater > /dev/null
+          UPDATER_BASE=updater:ci ROOT="$PWD" HOOKS="$PWD/parts/upgrade-test/upgrade-test.hooks.sh" APP_IMAGE=updater-example:ci bash parts/upgrade-test/upgrade-test.sh
 
   # The title becomes the squash commit, and so a line in the release notes
   title:

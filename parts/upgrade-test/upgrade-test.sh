@@ -10,6 +10,7 @@
 #                   a first leg each, then the full run from the last)
 #   UPGRADE_LEGS    `first` stops after the update from the published release
 #   UPGRADE_OLDER   `skip` leaves the older releases to someone else (CI runs each as its own job)
+#   UPDATER_BASE    another updater image than the one the compose file pins
 #   HOOKS           what only your product knows (default: scripts/upgrade-test.hooks.sh): where it is published,
 #                   how to make it another version, how to put data in and find it again
 set -euo pipefail
