@@ -122,7 +122,7 @@ ask() {
   in_updater "jq -n '{id: \"$id\", version: \"$1\", at: \"now\"}' > /state/updates/request.json"
   for _ in $(seq 1 180); do
     if [ "$(in_updater 'jq -r .id /state/updates/status.json 2>/dev/null' 2>/dev/null)" = "$id" ]; then
-      case "$(state)" in done | failed | refused) return 0 ;; esac
+      case "$(state)" in 'done' | failed | refused) return 0 ;; esac
     fi
     sleep 1
   done
@@ -135,7 +135,7 @@ pinned() { grep -q "$repo:$1" "$(basename "$COMPOSE_FILE")"; }
 mine() { [ "$(ls -ln "$(basename "$COMPOSE_FILE")" | awk '{print $3}')" = "$(id -u)" ] || fail "the compose file no longer belongs to its owner"; }
 
 ask 98.0.0
-[ "$(state)" = done ] || fail "release $from → this build ended as $(state): $(detail)"
+[ "$(state)" = 'done' ] || fail "release $from → this build ended as $(state): $(detail)"
 [ "$(version)" = 98.0.0 ] || fail "after the update from $from it answers $(version)"
 pinned 98.0.0 || fail "the compose file isn't the new release's"
 mine
@@ -144,7 +144,7 @@ echo "upgrade: release $from → this build: its data is there"
 [ "${UPGRADE_LEGS:-all}" = all ] || exit 0
 
 ask 98.1.0
-[ "$(state)" = done ] && [ "$(version)" = 98.1.0 ] || fail "98.0.0 → 98.1.0 ended as $(state): $(detail)"
+[ "$(state)" = 'done' ] && [ "$(version)" = 98.1.0 ] || fail "98.0.0 → 98.1.0 ended as $(state): $(detail)"
 echo "upgrade: 98.0.0 → 98.1.0"
 
 seed 98.1.0
