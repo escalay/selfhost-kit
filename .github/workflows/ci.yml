@@ -36,6 +36,25 @@ jobs:
           docker build -q -t updater:ci updater > /dev/null
           UPDATER_UNDER_TEST=updater:ci updater/test/real.sh
 
+  # The copy-in parts (parts/): the map's cases, the two workflow files linted, and the upgrade test run in full
+  # against the example app
+  parts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: parts/ci-plan/ci-plan.test.sh
+      - name: shellcheck
+        run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -x /mnt/parts/ci-plan/ci-plan.sh /mnt/parts/ci-plan/ci-plan.test.sh /mnt/parts/upgrade-test/upgrade-test.sh /mnt/parts/upgrade-test/upgrade-test.hooks.sh
+      - name: actionlint on the workflow parts
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color parts/ci-plan/ci.yml parts/release/release.yml
+      - name: The upgrade test, against the example app
+        run: |
+          docker build -q -t updater-example:ci --build-arg VERSION=ci example/app > /dev/null
+          ROOT="$PWD" HOOKS="$PWD/parts/upgrade-test/upgrade-test.hooks.sh" APP_IMAGE=updater-example:ci parts/upgrade-test/upgrade-test.sh
+
   # The title becomes the squash commit, and so a line in the release notes
   title:
     if: github.event_name == 'pull_request'

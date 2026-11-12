@@ -18,6 +18,8 @@ The parts a self-hosted app needs around its own code, shared by Escalay's produ
 | `updater/updater.sh` | The whole updater: watch for a request, verify, start, wait, roll back, hand over |
 | `updater/README.md` | Its contract with an app: the files, the release's files, the state folder, the settings |
 | `updater/test/` | A compose project and `run.sh` (only cosign is replaced), `signatures.sh` and `real.sh` (nothing is) |
+| `parts/` | Copy-in files for a product's own repository, listed in `registry.json` (`npx shadcn add escalay/selfhost-kit/<part>`): `ci-plan`, `upgrade-test`, `release`. CI runs the first two against the example app |
+| `skills/` | Agent skills (`npx skills add escalay/selfhost-kit`): `selfhost-ci` |
 | `example/` | The smallest app that keeps the contract, with its compose file. Every release publishes it signed, as a product would publish itself, and the release is proven against it before and after it is out |
 
 ## Invariants

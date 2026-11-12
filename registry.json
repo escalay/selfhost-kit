@@ -1,0 +1,41 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "escalay-selfhost",
+  "homepage": "https://github.com/escalay/selfhost-kit",
+  "items": [
+    {
+      "name": "ci-plan",
+      "type": "registry:item",
+      "title": "CI that tests a change by what it could break",
+      "description": "A script that decides which slow CI jobs a run needs from the files a pull request changes, with its own test cases, and the workflow that reads it: a push to main repeats nothing its pull request passed on the same commit, a release's pull request gets one real update, and every night everything runs. For a repository on GitHub Actions; its files go to the repo root",
+      "meta": { "root": true },
+      "files": [
+        { "path": "parts/ci-plan/ci-plan.sh", "type": "registry:file", "target": "~/scripts/ci-plan.sh" },
+        { "path": "parts/ci-plan/ci-plan.test.sh", "type": "registry:file", "target": "~/scripts/ci-plan.test.sh" },
+        { "path": "parts/ci-plan/ci.yml", "type": "registry:file", "target": "~/.github/workflows/ci.yml" }
+      ]
+    },
+    {
+      "name": "upgrade-test",
+      "type": "registry:item",
+      "title": "Upgrade test through the updater",
+      "description": "Updates end to end against real Docker: every published release that can still update in one step is started with data in it and updated by the updater to the image under test, then a newer version, then one that dies after migrating and must be rolled back with its data. A hooks file holds what only the product knows. For an app that runs from a compose file with the updater; its files go to the repo root",
+      "meta": { "root": true },
+      "files": [
+        { "path": "parts/upgrade-test/upgrade-test.sh", "type": "registry:file", "target": "~/scripts/upgrade-test.sh" },
+        { "path": "parts/upgrade-test/upgrade-test.hooks.sh", "type": "registry:file", "target": "~/scripts/upgrade-test.hooks.sh" }
+      ]
+    },
+    {
+      "name": "release",
+      "type": "registry:item",
+      "title": "Releases the updater can install",
+      "description": "The release workflow of a self-hosted product: release-please keeps a release pull request and its checks are started for it; merging it builds, scans, smoke-tests, pushes and signs the image, publishes a signed release.json naming the image by digest and the compose file by hash, runs the updater's own signature checks against it, and opens the notes with docs/releases/<version>.md when there is one. For a repository with a Dockerfile and deploy/compose; its files go to the repo root",
+      "meta": { "root": true },
+      "files": [
+        { "path": "parts/release/release.yml", "type": "registry:file", "target": "~/.github/workflows/release.yml" },
+        { "path": "parts/release/release.json", "type": "registry:file", "target": "~/deploy/release.json" }
+      ]
+    }
+  ]
+}

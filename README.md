@@ -6,6 +6,7 @@ shared by Escalay's products. MIT licensed; use them for your own.
 | Part | What | Status |
 |---|---|---|
 | [Updater](updater/README.md) | A container beside your app that installs the updates it asks for and rolls back the ones that fail | Released as `ghcr.io/escalay/updater` |
+| [CI and release parts](parts/README.md) | Copy-in files: CI that tests a change by what it could break, the upgrade test through the updater, and a release workflow whose releases the updater can install | `npx shadcn add escalay/selfhost-kit/<part>` |
 | Update and telemetry clients, owner sign-in, claim-and-setup, database and migrations | The app side of the same contracts, as copy-in parts | Planned; today they live in Yardhand |
 
 ## The updater in one minute

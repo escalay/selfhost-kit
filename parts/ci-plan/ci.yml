@@ -1,0 +1,285 @@
+# CI for a self-hosted product, from escalay/selfhost-kit (part "ci-plan"). Every change is tested by what it could
+# break: scripts/ci-plan.sh decides which slow jobs a run needs, and scripts/ci-plan.test.sh holds that map to its
+# cases. A push to main repeats nothing its pull request already passed on the same commit, a release's pull request
+# gets one real update (the release workflow starts this one for it, since a bot's pull request starts nothing),
+# and every night everything runs, from every release. Yours to edit: the jobs are a starting point for a pnpm
+# repository with a Dockerfile at its root, a smoke test (scripts/smoke.sh) and the kit's upgrade test.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # What this run needs (scripts/ci-plan.sh), and which older releases the upgrade test starts from
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read # the files a pull request changes
+      checks: read # whether this commit already passed in its pull request
+    outputs:
+      e2e: ${{ steps.plan.outputs.e2e }}
+      compose: ${{ steps.plan.outputs.compose }}
+      kubernetes: ${{ steps.plan.outputs.kubernetes }}
+      older: ${{ steps.releases.outputs.older }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          tested=false
+          if [ "$EVENT" = push ]; then
+            # The slow jobs of an earlier run on this very commit: passed, or skipped as not needed
+            passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" --paginate \
+              --jq '.check_runs[] | select(.conclusion == "success" or .conclusion == "skipped") | .name' \
+              | grep -xE 'gate|e2e|self-hosting|kubernetes' | sort -u | wc -l)
+            [ "$passed" -lt 4 ] || tested=true
+          fi
+          files=
+          if [ -n "$NUMBER" ]; then
+            # Each file, and whether its change adds a migration or a table
+            files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" --paginate --jq '.[] | [.filename,
+              ((.patch // "") | test("(^|\\n)\\+[^\\n]*(migrations|(create|alter|drop) +(table|index))"; "i"))] | @tsv')
+          fi
+          printf '%s\n' "$files" | TESTED="$tested" scripts/ci-plan.sh | tee -a "$GITHUB_OUTPUT"
+      - id: releases
+        env:
+          WHICH: ${{ steps.plan.outputs.older }}
+        run: |
+          least=$(jq -r .upgradeFrom deploy/release.json)
+          published=$(git ls-remote --tags --refs "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" 'v*' | sed 's|.*refs/tags/v||' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+          last=$(echo "$published" | tail -n 1)
+          # Older than the last one, which the self-hosting job starts from, and still able to update in one step
+          older=$(echo "$published" | awk -v least="$least" -v last="$last" '
+            function key(v, p) { split(v, p, "."); return p[1] * 1000000 + p[2] * 1000 + p[3] }
+            key($0) >= key(least) && key($0) < key(last)')
+          case "$WHICH" in
+            none) older= ;;
+            # The oldest and the newest of them: the longest jump and the most likely one
+            some) older=$(printf '%s\n' "$older" | sed -n '1p;$p' | sort -uV) ;;
+          esac
+          echo "older=$(printf '%s' "$older" | jq -R . | jq -sc 'map(select(length > 0))')" | tee -a "$GITHUB_OUTPUT"
+
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: corepack enable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm gate
+
+  e2e:
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: corepack enable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The browser is kept between runs, by the Playwright version that asks for it; its system packages are not
+      - id: playwright
+        run: echo "version=$(pnpm exec playwright --version | tr -dc '0-9.')" >> "$GITHUB_OUTPUT"
+      - id: browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browser.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.browser.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+      - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-traces
+          path: test-results
+          retention-days: 7
+
+  self-hosting:
+    needs: plan
+    if: needs.plan.outputs.compose == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: app:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: scripts/smoke.sh
+        env:
+          APP_IMAGE: app:ci
+      # Real updates through the updater, with Caddy and HTTPS in front: from the last release, one asked for through
+      # the API, and one that fails and must roll back. The older releases each get a job of their own below
+      - run: scripts/upgrade-test.sh
+        env:
+          APP_IMAGE: app:ci
+          UPGRADE_OLDER: skip
+
+  # Every older release that can still update in one step, with data in it, updated to this image
+  upgrade-from:
+    needs: plan
+    if: needs.plan.outputs.older != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.plan.outputs.older) }}
+    name: upgrade from ${{ matrix.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: app:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+      - run: scripts/upgrade-test.sh
+        env:
+          APP_IMAGE: app:ci
+          UPGRADE_FROM: ${{ matrix.release }}
+          UPGRADE_LEGS: first
+
+  # The Helm chart on a real cluster: the last release installed, upgraded to this image, then a version that dies
+  # after migrating and a `helm rollback`, after which the old version must have its data back
+  kubernetes:
+    needs: plan
+    if: needs.plan.outputs.kubernetes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: app:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+      - run: kind create cluster --wait 120s
+      - run: scripts/smoke-helm.sh
+        env:
+          APP_IMAGE: app:ci
+
+  # actionlint for mistakes, zizmor for the ways a workflow can be turned against its repository; then what never
+  # needs a slow job: the map of what runs for which change, and the chart's lint and numbers
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - name: zizmor
+        run: pipx run zizmor==1.32.0 --offline .github
+      - name: What runs for which change
+        run: scripts/ci-plan.test.sh
+      - run: helm lint deploy/helm/app
+      - name: The chart installs the version it is numbered as, and that is this tree's
+        run: |
+          chart=$(helm show chart deploy/helm/app)
+          version=$(echo "$chart" | sed -n 's/^version: //p' | tr -d '"')
+          app=$(echo "$chart" | sed -n 's/^appVersion: //p' | tr -d '"')
+          tree=$(jq -r '."."' .release-please-manifest.json)
+          if [ "$version" != "$tree" ] || [ "$app" != "$tree" ]; then
+            echo "::error::the chart is numbered $version and installs $app, but this tree is $tree"; exit 1
+          fi
+
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 git /repo --no-banner --redact
+
+  # A pull request is squashed into one commit named after its title, and releases are cut from those names
+  title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: The title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|docs|refactor|chore|test|build|ci|revert)(\([a-z0-9./-]+\))?!?: [^ ].*$'
+          if ! printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "::error::The title \"$TITLE\" isn't a Conventional Commit. Write it as type(scope): summary, for example \"fix(web): keep the menu open on a phone\". Types: feat, fix, perf, docs, refactor, chore, test, build, ci, revert."
+            exit 1
+          fi
+
+  # Dependency review needs a public repository on GitHub's free plan
+  dependencies:
+    if: github.event_name == 'pull_request' && !github.event.repository.private
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # the summary it leaves on a pull request that adds a vulnerable dependency
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
