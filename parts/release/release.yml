@@ -1,4 +1,4 @@
-# selfhost-kit release@1.2.0 # x-release-please-version
+# selfhost-kit release@1.2.1 # x-release-please-version
 # Releases of a self-hosted product, from escalay/selfhost-kit (part "release"). On main, release-please keeps a
 # release pull request open from the Conventional Commits since the last release, and this workflow starts that pull
 # request's checks. Merging it tags vX.Y.Z and drafts the GitHub Release. Every push to main also builds the image

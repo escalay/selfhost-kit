@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/escalay/selfhost-kit/compare/v1.2.0...v1.2.1) (2026-11-24)
+
+
+### Fixed
+
+* **updater:** keep what it acts on out of the state volume ([#10](https://github.com/escalay/selfhost-kit/issues/10)) ([0f0e313](https://github.com/escalay/selfhost-kit/commit/0f0e3137bdc957d87efd1c1a510c8c6b6aad7300))
+
 ## [1.2.0](https://github.com/escalay/selfhost-kit/compare/v1.1.0...v1.2.0) (2026-11-12)
 
 

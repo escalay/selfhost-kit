@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selfhost-kit ci-plan@1.2.0 # x-release-please-version
+# selfhost-kit ci-plan@1.2.1 # x-release-please-version
 # What CI runs for which change (ci-plan.sh), case by case. Run it in a job that always runs; add a case whenever
 # you change the map.
 set -euo pipefail

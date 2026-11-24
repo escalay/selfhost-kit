@@ -27,7 +27,7 @@ services:
     image: ${APP_IMAGE:-ghcr.io/you/app:<version>}
     volumes: [state:/state]
   updater:
-    image: ghcr.io/escalay/updater:1.2.0 # x-release-please-version
+    image: ghcr.io/escalay/updater:1.2.1 # x-release-please-version
     environment:
       UPDATER_REPO: you/app
       UPDATER_IMAGE: ghcr.io/you/app
