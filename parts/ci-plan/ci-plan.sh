@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# selfhost-kit ci-plan@1.2.0 # x-release-please-version
 # Decides which of CI's slow jobs a run needs, so a change is tested by what it could break and nothing is tested
 # twice. Prints one `name=value` per line: e2e, compose, kubernetes (true or false) and older (which older releases
 # the upgrade test starts from: none, some, all). The CI workflow reads them; ci-plan.test.sh holds the map to its

@@ -1,6 +1,6 @@
 # Every change: the updater's script linted, the updater run end to end against real Docker (a good update, a failed
 # one that must roll back, the requests that must be refused), its cosign held to real published signatures, the
-# workflows linted, and on pull requests the title.
+# docs held to the code (test/docs.sh), the workflows linted, and on pull requests the title.
 name: CI
 
 on:
@@ -36,8 +36,8 @@ jobs:
           docker build -q -t updater:ci updater > /dev/null
           UPDATER_UNDER_TEST=updater:ci updater/test/real.sh
 
-  # The copy-in parts (parts/): the map's cases, the two workflow files linted, and the upgrade test run in full
-  # against the example app
+  # The copy-in parts (parts/), found by glob: the map's cases, the docs against the code, every shell and workflow file
+  # linted, and the upgrade test run in full against the example app
   parts:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -46,11 +46,13 @@ jobs:
         with:
           persist-credentials: false
       # As a copied file runs: without the executable bit
-      - run: chmod -x parts/ci-plan/*.sh parts/upgrade-test/*.sh && bash parts/ci-plan/ci-plan.test.sh
+      - run: chmod -x parts/*/*.sh && bash parts/ci-plan/ci-plan.test.sh
+      - name: The docs against the code
+        run: bash test/docs.sh
       - name: shellcheck
-        run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:v0.11.0 -x /mnt/parts/ci-plan/ci-plan.sh /mnt/parts/ci-plan/ci-plan.test.sh /mnt/parts/upgrade-test/upgrade-test.sh /mnt/parts/upgrade-test/upgrade-test.hooks.sh
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 -x parts/*/*.sh test/*.sh
       - name: actionlint on the workflow parts
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color parts/ci-plan/ci.yml parts/release/release.yml
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color parts/*/*.yml
       - name: The upgrade test, against the example app
         run: |
           docker build -q -t updater-example:ci --build-arg VERSION=ci example/app > /dev/null

@@ -56,6 +56,18 @@ release 1.5.0 1.0.0 "" localhost:5599/updater:2
 mkdir -p "$work/releases/v1.4.0" && cp "$work/releases/v1.3.0/"* "$work/releases/v1.4.0/"
 jq '.version = "1.4.0"' "$work/releases/v1.3.0/release.json" > "$work/releases/v1.4.0/release.json"
 echo "# changed after signing" >> "$work/releases/v1.4.0/docker-compose.yml"
+# wrong VERSION FILTER: 1.3.0's release files served as VERSION, with jq's FILTER applied to its release file
+wrong() {
+  mkdir -p "$work/releases/v$1" && cp "$work/releases/v1.3.0/"* "$work/releases/v$1/"
+  jq "$2" "$work/releases/v1.3.0/release.json" > "$work/releases/v$1/release.json"
+}
+wrong 1.6.0 .
+wrong 1.6.1 '.version = "1.6.1" | .image = "localhost:5599/other@" + (.image | sub(".*@"; ""))'
+wrong 1.6.2 '.version = "1.6.2" | .image = "localhost:5599/app@sha256:" + ("0" * 64)'
+# shellcheck disable=SC2016
+sed 's|image: busybox:1.37|image: ${NEEDED:?set NEEDED in .env}|' "$work/releases/v1.3.0/docker-compose.yml" > "$work/needs.yml"
+wrong 1.6.3 ".version = \"1.6.3\" | .compose.sha256 = \"$(shasum -a 256 "$work/needs.yml" | cut -d' ' -f1)\""
+cp "$work/needs.yml" "$work/releases/v1.6.3/docker-compose.yml"
 
 cd "$work"
 in_app() { docker compose exec -T app sh -c "$1"; }
@@ -102,6 +114,7 @@ in_updater 'test ! -d /state/updates/rollback' || fail "the rollback copies were
 [ ! -e .updater ] || fail "what the updater kept for the run was left in the project folder"
 pass "1.0.0 → 1.1.0: verified, started by its digest, .env and its owner kept, the service behind a profile moved too"
 
+why="a new version that never comes up"
 in_app 'echo "written before the bad update" >> /state/state.sqlite'
 before=$(in_app 'cat /state/state.sqlite')
 ask 1.2.0
@@ -116,32 +129,69 @@ in_app 'test ! -f /state/backups/before-1.2.0.sqlite' || fail "the used backup w
 [ "$(in_app 'cat /state/version')" = 1.1.0 ] || fail "the version file says $(in_app 'cat /state/version')"
 pass "1.1.0 → broken 1.2.0: rolled back to 1.1.0 with the old compose file and data ($(detail))"
 
-refused() { # VERSION WHY
+refused() { # VERSION WHY DETAIL: DETAIL is part of what the updater says, so the case is refused for its own reason
   ask "$1"
   [ "$(state)" = refused ] || fail "$2: ended as $(state), not refused: $(detail)"
+  detail | grep -qF "$3" || fail "$2: refused for another reason: $(detail)"
   [ "$(health)" = 1.1.0 ] || fail "$2: the app now answers $(health)"
   [ "$(pinned)" = 'app:1.1.0}' ] || fail "$2: the compose file changed"
   pass "refused, $2: $(detail)"
 }
-refused 1.0.0 "an older version"
-refused '1.9.0; touch /state/pwned' "a version that isn't one"
+refused 1.0.0 "an older version" "isn't newer"
+refused '1.9.0; touch /state/pwned' "a version that isn't one" "names no version"
 in_updater 'test ! -f /state/pwned' || fail "a request ran a command"
-refused 2.0.0 "a release this version can't reach directly"
-refused 1.4.0 "a compose file changed after signing"
-refused 1.7.0 "a release that doesn't exist"
+refused 2.0.0 "a release this version can't reach directly" "can be reached directly only from"
+refused 1.4.0 "a compose file changed after signing" "isn't the one its release file names"
+refused 1.7.0 "a release that doesn't exist" "has no release.json"
+refused 1.6.0 "a release file for another version" "describes another version"
+refused 1.6.1 "an image from elsewhere" "names an image that isn't"
+refused 1.6.2 "an image that can't be pulled" "couldn't be pulled"
+refused 1.6.3 "a compose file that doesn't load" "doesn't load with this folder's .env"
+why="a request that waited too long"
 in_updater "jq -n '{id: \"old\", version: \"1.3.0\"}' > /state/updates/request.json && touch -d '2020-01-01 00:00:00' /state/updates/request.json"
 id=old; finished
-[ "$(state)" = refused ] && [ "$(health)" = 1.1.0 ] || fail "a request from long ago ended as $(state): $(detail)"
-pass "refused, a request that waited too long: $(detail)"
+[ "$(state)" = refused ] && detail | grep -qF "waited more than" && [ "$(health)" = 1.1.0 ] || fail "$why: ended as $(state): $(detail)"
+pass "refused, $why: $(detail)"
 in_updater 'touch /state/cosign.refuse'
-refused 1.3.0 "a bad signature"
+refused 1.3.0 "a bad signature" "files of release 1.3.0 aren't signed"
 in_updater 'rm /state/cosign.refuse'
+in_updater 'touch /state/cosign.refuse-image'
+refused 1.3.0 "an image nobody signed" "image of release 1.3.0 isn't signed"
+in_updater 'rm /state/cosign.refuse-image'
+
+why="an app that isn't answering"
+docker compose stop app >/dev/null 2>&1
+ask 1.3.0
+[ "$(state)" = refused ] && detail | grep -qF "isn't answering" || fail "$why: ended as $(state): $(detail)"
+docker compose start app >/dev/null 2>&1
+for _ in $(seq 1 30); do [ "$(health)" = 1.1.0 ] && break; sleep 1; done
+[ "$(health)" = 1.1.0 ] && [ "$(pinned)" = 'app:1.1.0}' ] || fail "$why: the app didn't come back as it was"
+pass "refused, $why: $(detail)"
+
+why="a run cut short before it changed anything"
+# A run the updater began and kept no copy for yet, as it is while it verifies a release
+in_updater "mkdir -p /project/.updater && jq -n '{id: \"cut\", from: \"1.1.0\", to: \"1.3.0\", startedAt: \"now\"}' > /project/.updater/run.json"
+docker compose kill updater >/dev/null 2>&1
+docker compose start updater >/dev/null 2>&1
+id=cut; finished
+[ "$(state)" = refused ] && detail | grep -qF "stopped before it changed anything" && [ "$(health)" = 1.1.0 ] \
+  && [ "$(pinned)" = 'app:1.1.0}' ] || fail "$why: ended as $(state): $(detail)"
+pass "refused, $why: $(detail)"
+
+why="an updater outside a compose project"
+code=0
+log=$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e UPDATER_REPO=example/app -e UPDATER_IMAGE=localhost:5599/app \
+  updater:test 2>&1) || code=$?
+[ "$code" = 78 ] || fail "$why: exited $code, not 78"
+printf '%s\n' "$log" | grep -qF "isn't part of a compose project" || fail "$why: exited 78 for another reason: $log"
+pass "$why: exits 78 ($(printf '%s\n' "$log" | tail -n 1))"
 
 ask 1.3.0
 [ "$(state)" = done ] && [ "$(health)" = 1.3.0 ] || fail "1.1.0 → 1.3.0 ended as $(state): $(detail)"
 pass "1.1.0 → 1.3.0 after the refusals"
 
 # The updater stopped in the middle: at its next start it finishes the run one way or the other
+why="an update interrupted by stopping the updater"
 request 1.3.5
 for _ in $(seq 1 60); do in_updater 'jq -r .step /state/updates/status.json' 2>/dev/null | grep -q '^waiting' && break; sleep 1; done
 docker compose kill updater >/dev/null 2>&1
@@ -150,7 +200,7 @@ finished
 [ "$(state)" = failed ] || fail "the interrupted update ended as $(state): $(detail)"
 [ "$(health)" = 1.3.0 ] || fail "after the interrupted update the app answers $(health)"
 [ "$(pinned)" = 'app:1.3.0}' ] || fail "after the interrupted update the compose file is pinned to $(pinned)"
-pass "an update interrupted by stopping the updater: rolled back at its next start ($(detail))"
+pass "$why: rolled back at its next start ($(detail))"
 
 side() { docker inspect updater-test-side-1 --format '{{ .State.Running }} {{ join .Config.Cmd " " }}' 2>&1; }
 runs() { in_updater 'wc -l < /state/updates/history.jsonl' | tr -d ' '; }
@@ -194,6 +244,7 @@ pass "a copy planted in the state volume during an update: the rollback used its
 
 # A run left as working with a copy in the state volume, as an updater before 1.2.1 would leave it or the app could
 # plant it: never rolled back to, removed and reported once
+why="a copy left in the state volume at start"
 before=$(runs)
 docker compose stop updater >/dev/null 2>&1
 plant
@@ -209,7 +260,7 @@ in_volume 'rm -f /state/updates/updater.json'
 docker compose restart updater >/dev/null 2>&1
 for _ in $(seq 1 30); do in_updater 'test -f /state/updates/updater.json' 2>/dev/null && break; sleep 1; done
 [ "$(runs)" = $((before + 1)) ] || fail "the copy in the state volume was reported again"
-pass "a copy left in the state volume at start: not used, removed, reported once ($reported)"
+pass "$why: not used, removed, reported once ($reported)"
 
 # The updates folder made a link into the project folder: nothing is written or removed there, and the updater runs on
 mkdir -p linked/rollback && echo "the owner's" > linked/status.json && echo "the owner's" > linked/rollback/kept
@@ -260,6 +311,7 @@ next_run() { # RUNS: waits for the history to pass that many runs
   for _ in $(seq 1 60); do [ "$(runs)" -gt "$1" ] && return 0; sleep 1; done
   fail "no run was recorded after $1 (status: $(in_updater 'cat /state/updates/status.json' 2>&1))"
 }
+why="a request that isn't a plain file"
 echo '{"id":"elsewhere","version":"1.9.9"}' > elsewhere.json
 before=$(runs)
 in_volume 'ln -sf /project/elsewhere.json /state/updates/request.json'
@@ -269,18 +321,18 @@ next_run "$before"
 in_volume '[ ! -e /state/updates/request.json ] && [ ! -L /state/updates/request.json ]' || fail "the linked request was left"
 [ "$(cat elsewhere.json)" = '{"id":"elsewhere","version":"1.9.9"}' ] || fail "the file the request linked to changed"
 rm -f elsewhere.json
-pass "refused, a request that is a link: $(detail)"
+pass "refused, $why (a link): $(detail)"
 before=$(runs)
 in_volume 'mkfifo /state/updates/request.json'
 next_run "$before"
 [ "$(state)" = refused ] && in_volume '[ ! -e /state/updates/request.json ]' || fail "a request that is a pipe: $(state), $(detail)"
-pass "refused, a request that is a pipe: $(detail)"
+pass "refused, $why (a pipe): $(detail)"
 before=$(runs)
 in_volume 'mkdir -p /state/updates/request.json/inner && : > /state/updates/request.json/inner/x'
 next_run "$before"
 [ "$(state)" = refused ] && in_volume '[ ! -e /state/updates/request.json ]' || fail "a request that is a folder: $(state), $(detail)"
 in_volume 'rm -rf /state/updates/request.left.*'
-pass "refused, a request that is a folder: $(detail)"
+pass "refused, $why (a folder): $(detail)"
 id=multi
 in_updater "jq -n '{id: \"multi\", version: \"1.9.0\\n1.9.0\"}' > /state/updates/request.json"
 finished
@@ -296,20 +348,32 @@ in_app 'printf "{\"status\":\"ok\",\"version\":\"1.3.0\"}" > /www/api/health'
 [ "$(health)" = 1.3.0 ] || fail "the health answer wasn't put back"
 pass "refused, an endless health answer: $(detail)"
 
-# Settings that would have the updater work in the state volume: it refuses to start
+# Settings that would have the updater work in the state volume, or in another folder than /project: it refuses to
+# start
+why="a database name with a /"
 out=$(docker run --rm -e UPDATER_REPO=example/app -e UPDATER_IMAGE=localhost:5599/app -e UPDATER_DATABASE=../outside.sqlite updater:test 2>&1) && code=0 || code=$?
-[ "$code" = 78 ] && echo "$out" | grep -q UPDATER_DATABASE || fail "a database outside the state folder was taken ($code): $out"
+[ "$code" = 78 ] && echo "$out" | grep -q UPDATER_DATABASE || fail "$why was taken ($code): $out"
+pass "$why: exits 78 ($(echo "$out" | tail -n 1))"
+why="a project folder inside the state folder"
 docker run -d --name updater-test-inside -v updater-test-inside:/state -v "$work:/project" -v /var/run/docker.sock:/var/run/docker.sock \
   --label com.docker.compose.project=updater-inside --label com.docker.compose.service=updater \
   --label com.docker.compose.project.working_dir=/state/inside --label com.docker.compose.project.config_files=/state/inside/docker-compose.yml \
   -e UPDATER_REPO=example/app -e UPDATER_IMAGE=localhost:5599/app updater:test >/dev/null
 for _ in $(seq 1 15); do [ "$(docker inspect updater-test-inside --format '{{ .State.Status }}')" = exited ] && break; sleep 1; done
 [ "$(docker inspect updater-test-inside --format '{{ .State.Status }} {{ .State.ExitCode }}')" = "exited 78" ] \
-  || fail "a project folder inside the state volume was taken: $(docker logs updater-test-inside 2>&1 | tail -n 3)"
+  || fail "$why was taken: $(docker logs updater-test-inside 2>&1 | tail -n 3)"
+pass "$why: exits 78 ($(docker logs updater-test-inside 2>&1 | tail -n 1))"
 docker rm -f updater-test-inside >/dev/null 2>&1; docker volume rm updater-test-inside >/dev/null 2>&1
-pass "refused to start: a database outside the state folder, a project folder inside it"
+why="a project folder at a folder the image has"
+out=$(docker run --rm -v "$work:/project" -v /var/run/docker.sock:/var/run/docker.sock \
+  --label com.docker.compose.project=updater-srv --label com.docker.compose.service=updater \
+  --label com.docker.compose.project.working_dir=/srv --label com.docker.compose.project.config_files=/srv/docker-compose.yml \
+  -e UPDATER_REPO=example/app -e UPDATER_IMAGE=localhost:5599/app updater:test 2>&1) && code=0 || code=$?
+[ "$code" = 78 ] && echo "$out" | grep -qF "is another folder in this container" || fail "$why was taken ($code): $out"
+pass "$why: exits 78 ($(echo "$out" | tail -n 1))"
 
 # A kept copy in the project folder that changed after it was taken is refused, and nothing is put back from it
+why="a kept copy changed during the update"
 request 1.3.7
 reached waiting
 in_folder 'test -d /project/.updater && find /project/.updater -type f -exec sed -i "s|app:1.3.0}|app:1.1.0}|; s|sleep 1130|sleep 666|" {} +' \
@@ -318,7 +382,7 @@ finished
 [ "$(state)" = failed ] || fail "the broken 1.3.7 with a changed copy ended as $(state): $(detail)"
 [ "$(pinned)" = 'app:1.3.7}' ] || fail "a changed copy was put back: the compose file is pinned to $(pinned)"
 [ "$(side)" != "true sleep 666" ] || fail "a changed copy was started"
-pass "a kept copy changed during the update: refused ($(detail))"
+pass "$why: nothing put back ($(detail))"
 # What the status says is left to do by hand
 cp releases/v1.3.0/docker-compose.yml docker-compose.yml
 docker compose --profile side up -d >/dev/null 2>&1 || fail "1.3.0 didn't start again by hand"
@@ -339,6 +403,6 @@ done
 sleep 3
 in_updater 'jq -e .at /state/updates/updater.json >/dev/null' || fail "the new updater isn't running"
 # One run went unrecorded: its history was a link
-[ "$(runs)" = 20 ] || fail "the history has $(runs) runs, not 20"
-pass "1.3.0 → 1.5.0 from a 5 KB health answer: the updater handed over to the newer one, and all 20 recorded runs are in the history"
+[ "$(runs)" = 27 ] || fail "the history has $(runs) runs, not 27"
+pass "1.3.0 → 1.5.0 from a 5 KB health answer: the updater handed over to the newer one, and all 27 recorded runs are in the history"
 echo "updater: all good"
