@@ -5,7 +5,8 @@
 # the new version, and otherwise restores the old compose file, image and data. README.md has the whole contract.
 #
 # The request is a hint from a less trusted place: only a version number is read from it. Where releases and images
-# come from, and who must have signed them, are this container's own settings.
+# come from, and who must have signed them, are this container's own settings. What a run keeps to act on later (the
+# copy to roll back to) lives in the project folder, which the app doesn't mount, never in the state volume.
 set -eu
 
 : "${UPDATER_REPO:?the GitHub repository whose releases are installed, as owner/name}"
@@ -25,32 +26,66 @@ POLL="${UPDATER_POLL:-10}"
 FRESH="${UPDATER_FRESH:-60}"
 VERSION="${UPDATER_VERSION:-dev}"
 PROJECT_MOUNT=/project
+# What the app and the updater exchange. The app can write all of it, so only a request's version is read from it.
+mkdir -p "$STATE" && STATE=$(cd -P "$STATE" && pwd -P)
 DIR="$STATE/updates"
-KEPT="$DIR/rollback"
+# What the updater keeps for a run and acts on later: in the project folder, which only this container mounts
+OWN="$PROJECT_MOUNT/.updater"
+RUN="$OWN/run.json"
+KEPT="$OWN/kept"
+SUMS="$OWN/kept.sha256"
 WORK=/tmp/update
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 say() { echo "updater: $*"; }
-semver() { echo "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; }
+semver() { case "$1" in '' | *[!0-9.]*) return 1 ;; esac; echo "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; }
 # newer A B: A is a later version than B
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }
-# put FILE: stdin becomes FILE in one step, so a reader never sees half of it
+# put FILE: stdin becomes FILE in one step, so a reader never sees half of it. For the updater's own files only
 put() { cat > "$1.tmp" && mv "$1.tmp" "$1"; }
+
+# The app can leave links in the state volume. So the updater works there only inside a folder reached through no
+# link, and writes a file whole into a new file it creates itself (noclobber: never a name already taken), then
+# renames it over the old one: a link to a file is replaced, never written through, appended to or read; a link to a
+# folder is left, and so is the write. What can't be written so is left as it was and logged.
+# within FOLDER CMD...: CMD runs in FOLDER, unless FOLDER is a link or inside one
+within() { ( cd -P "$1" 2> /dev/null && [ "$(pwd -P)" = "$1" ] && shift && "$@" ); }
+# write FOLDER NAME [add]: stdin becomes FOLDER/NAME, or with `add` is added at its end
+write() { within "$1" write_here "$2" "${3:-}" || say "left $1/$2 as it was: it isn't a plain file in a folder of the state volume (a link?)" >&2; }
+write_here() {
+  tmp=$(mktemp -u ".$1.XXXXXX") || return 1
+  # With noclobber the shell creates the file only if nothing is at that name, so what it writes to is its own
+  if ( set -C; exec 3> "$tmp" || exit 1
+    if [ -n "$2" ] && { [ -e "$1" ] || [ -L "$1" ]; }; then
+      [ -f "$1" ] && [ ! -L "$1" ] && was=$(stat -c %d:%i "$1") || exit 1
+      # The copy is read only from the file just looked at: a link put in its place since is refused, a pipe times out
+      # shellcheck disable=SC2016
+      timeout 5 sh -c 'exec < "$1" && [ "$(stat -L -c %d:%i /proc/self/fd/0)" = "$2" ] && cat' sh "$1" "$was" >&3 || exit 1
+    fi
+    cat >&3
+  ) && mv -fT "$tmp" "$1"; then return 0; fi
+  rm -f "$tmp"
+  return 1
+}
 
 # status STATE STEP DETAIL: what the app shows its owner
 status() {
-  jq -n --arg id "$id" --arg state "$1" --arg step "$2" --arg from "$from" --arg to "$to" \
+  last=$(jq -cn --arg id "$id" --arg state "$1" --arg step "$2" --arg from "$from" --arg to "$to" \
     --arg startedAt "$started" --arg at "$(now)" --arg detail "${3:-}" \
     '{id: $id, state: $state, step: $step, from: $from, to: $to, startedAt: $startedAt, at: $at,
-      detail: (if $detail == "" then null else $detail end)}' | put "$DIR/status.json"
+      detail: (if $detail == "" then null else $detail end)}')
+  echo "$last" | write "$DIR" status.json
   say "$1: $2${3:+ ($3)}"
 }
 # finish STATE STEP DETAIL: the last status of a run, kept in the history
 finish() {
   status "$@"
-  jq -c . "$DIR/status.json" >> "$DIR/history.jsonl"
-  rm -rf "$WORK" "$KEPT"
+  echo "$last" | write "$DIR" history.jsonl add
+  rm -rf "$WORK" "$OWN"
 }
+# The run, the compose file and the services kept for a rollback, as they were when the hash was taken
+kept_hashes() { (cd "$OWN" && sha256sum run.json "kept/$FILE" kept/services 2>/dev/null) || true; }
+intact() { [ -s "$SUMS" ] && [ "$(kept_hashes)" = "$(cat "$SUMS")" ] && semver "$from" && semver "$to"; }
 
 # The compose project this container belongs to, and its folder on the host. Compose reads files here and sends
 # paths to Docker on the host, so the folder must have the same path in both places: a link gives it one.
@@ -64,9 +99,12 @@ project() {
   # The first file is the release's and is replaced by each update; any after it are the owner's and are kept
   FILE=$(basename "$(echo "$FILES" | head -n 1)")
   [ -f "$PROJECT_MOUNT/$FILE" ] || { say "the project folder isn't mounted at $PROJECT_MOUNT (no $FILE there)"; exit 78; }
+  case "$HOST_DIR/" in "$STATE"/*) say "the project folder ($HOST_DIR) is inside the state folder, which the app can write; it can't be updated from here"; exit 78 ;; esac
   if [ "$HOST_DIR" != "$PROJECT_MOUNT" ] && [ ! -e "$HOST_DIR" ]; then
     mkdir -p "$(dirname "$HOST_DIR")" && ln -s "$PROJECT_MOUNT" "$HOST_DIR"
   fi
+  [ "$(stat -L -c %d:%i "$HOST_DIR")" = "$(stat -L -c %d:%i "$PROJECT_MOUNT")" ] \
+    || { say "$HOST_DIR is another folder in this container than the project folder mounted at $PROJECT_MOUNT"; exit 78; }
 }
 # compose_with FIRST ARGS: compose over FIRST in the release file's place, then the owner's own files
 compose_with() {
@@ -81,7 +119,9 @@ compose_with() {
 }
 compose() { compose_with "$HOST_DIR/$FILE" "$@"; }
 
-running_version() { curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true; }
+running_version() {
+  curl -fsS --max-time 5 "$HEALTH_URL" 2> /dev/null | head -c 1048576 | jq -r '.version // empty | tostring' 2> /dev/null | head -c 32 || true
+}
 # answers VERSION SECONDS: the app answers as healthy with that version before the time is up
 answers() {
   waited=0
@@ -138,14 +178,17 @@ verify() {
 # Puts back what `start` replaced: the compose file, the version that last ran, and the data from before the
 # update when the new version got as far as backing it up (the app takes a staged restore at its next start).
 rollback() {
+  if ! intact; then
+    finish failed 'not rolled back' "$1 The copy of the old compose file kept for a rollback isn't the one taken at the start of the update, so it wasn't used and nothing was put back. Put the compose file of $from back by hand and run: docker compose up -d."
+    return
+  fi
   status working 'putting the old version back' "$1"
   compose stop "$SERVICE" > /dev/null 2>&1 || true
   cat "$KEPT/$FILE" > "$HOST_DIR/$FILE"
-  if [ -f "$STATE/backups/before-$to.sqlite" ]; then
-    mv "$STATE/backups/before-$to.sqlite" "$STATE/restore.pending.sqlite"
-    rm -f "$STATE/$DATABASE-wal" "$STATE/$DATABASE-shm"
+  if within "$STATE/backups" mv -fT "before-$to.sqlite" ../restore.pending.sqlite 2> /dev/null; then
+    within "$STATE" rm -f "$DATABASE-wal" "$DATABASE-shm" || true
   fi
-  echo "$from" > "$STATE/version"
+  echo "$from" | write "$STATE" version
   # shellcheck disable=SC2046
   LIMIT=$((TIMEOUT * 2)) compose up -d $(cat "$KEPT/services") > /dev/null 2>&1 || true
   if answers "$from" "$TIMEOUT"; then
@@ -178,6 +221,9 @@ update() {
   if ! semver "$from"; then finish refused 'checking the request' "The app isn't answering at $HEALTH_URL, so it isn't safe to replace. Look at its log first: docker compose logs $SERVICE."; return; fi
   if ! newer "$to" "$from"; then finish refused 'checking the request' "$to isn't newer than the $from that is running."; return; fi
 
+  mkdir -p "$OWN"
+  jq -n --arg id "$id" --arg from "$from" --arg to "$to" --arg startedAt "$started" \
+    '{id: $id, from: $from, to: $to, startedAt: $startedAt}' | put "$RUN"
   status working "verifying release $to"
   why=$(verify) || { finish refused "verifying release $to" "$why"; return; }
   file=$(jq -r '.compose.file // "docker-compose.yml"' "$WORK/release.json")
@@ -186,8 +232,10 @@ update() {
   mkdir -p "$KEPT"
   cp "$HOST_DIR/$FILE" "$KEPT/$FILE"
   services | tr '\n' ' ' > "$KEPT/services"
+  # Taken last: with the hash there, the compose file may be replaced, and a rollback checks the copy against it
+  kept_hashes | put "$SUMS"
   # A copy left by an earlier try at this version is older than the data now; the new version makes a fresh one
-  rm -f "$STATE/backups/before-$to.sqlite"
+  within "$STATE/backups" rm -f "before-$to.sqlite" || true
   # Written through the file that is there, so it stays its owner's
   cat "$WORK/$file" > "$HOST_DIR/$FILE"
   # shellcheck disable=SC2046
@@ -212,26 +260,57 @@ update() {
 
 # A run cut short (the host restarted, this container was stopped) is finished one way or the other
 recover() {
-  [ -f "$DIR/status.json" ] && [ "$(jq -r .state "$DIR/status.json" 2>/dev/null)" = working ] || return 0
-  id=$(jq -r .id "$DIR/status.json"); from=$(jq -r .from "$DIR/status.json")
-  to=$(jq -r .to "$DIR/status.json"); started=$(jq -r .startedAt "$DIR/status.json")
-  if [ ! -f "$KEPT/$FILE" ]; then finish refused 'interrupted' 'The updater stopped before it changed anything. Ask for the update again.'
-  elif answers "$to" 30; then finish 'done' "running $to"
+  [ -f "$RUN" ] || return 0
+  id=$(jq -r '.id // ""' "$RUN" 2>/dev/null) || id=; from=$(jq -r '.from // ""' "$RUN" 2>/dev/null) || from=
+  to=$(jq -r '.to // ""' "$RUN" 2>/dev/null) || to=; started=$(jq -r '.startedAt // ""' "$RUN" 2>/dev/null) || started=
+  if [ ! -f "$SUMS" ]; then finish refused 'interrupted' 'The updater stopped before it changed anything. Ask for the update again.'
+  elif semver "$to" && answers "$to" 30; then finish 'done' "running $to"
   else rollback 'The updater was stopped in the middle of the update.'; fi
 }
 
-mkdir -p "$DIR"
+# Updaters before 1.2.1 kept the copy for a rollback in the state folder, where the app can write. It is never used and
+# never walked: the two files such an updater left are removed, then the folder if that empties it
+forget_old_copy() {
+  [ -e "$DIR/rollback" ] || [ -L "$DIR/rollback" ] || return 0
+  within "$DIR/rollback" rm -f "$FILE" services 2> /dev/null || true
+  aside=$(within "$DIR" drop_old_copy) \
+    || { say "left $DIR/rollback as it was: it could be neither removed nor moved aside without looking inside" >&2; return 0; }
+  id=earlier-updater; to=; started=$(now); from=$(running_version)
+  finish failed 'interrupted' "A copy for a rollback, left in the state folder by an earlier updater, was removed unused${aside:+ (what else was in that folder is now in updates/$aside)}: this updater no longer acts on anything there. ${from:+$from answers now. }If an update was cut short and this isn't the version that should run, put its compose file back by hand and run: docker compose up -d."
+}
+# drop_old_copy: removes `rollback` here without looking inside it, or else renames it aside in one step and says to what
+drop_old_copy() {
+  { [ -L rollback ] || [ ! -d rollback ]; } && rm -f rollback 2> /dev/null && return 0
+  rmdir rollback 2> /dev/null && return 0
+  aside=$(mktemp -u rollback.left.XXXXXX) && mv -T rollback "$aside" && echo "$aside"
+}
+
+# take_request: the request's age in seconds, then its first 4 KiB, read once from the file that was looked at (one
+# that isn't a plain file reads as empty); the request is removed, or a folder that isn't empty is renamed aside
+take_request() {
+  if [ -f request.json ] && [ ! -L request.json ] && seen=$(stat -c '%d:%i %Y' request.json); then
+    echo "$(($(date +%s) - ${seen#* }))"
+    # shellcheck disable=SC2016
+    timeout 5 sh -c 'exec < "$1" && [ "$(stat -L -c %d:%i /proc/self/fd/0)" = "$2" ] && head -c 4096' sh request.json "${seen% *}" || true
+  else
+    echo 0
+  fi
+  rm -f request.json 2> /dev/null || rmdir request.json 2> /dev/null || mv -T request.json "$(mktemp -u request.left.XXXXXX)"
+}
+
+case "$DATABASE" in '' | . | .. | */*) say "UPDATER_DATABASE must name a file in the state folder, not $DATABASE"; exit 78 ;; esac
+within "$STATE" mkdir -p updates || say "left $DIR as it was: it is a link" >&2
 project
 say "version $VERSION, watching $DIR for $UPDATER_REPO in project $NAME ($HOST_DIR)"
 recover
+forget_old_copy
 while :; do
-  jq -n --arg at "$(now)" --arg version "$VERSION" '{at: $at, version: $version}' | put "$DIR/updater.json"
-  if [ -f "$DIR/request.json" ]; then
-    id=$(jq -r '.id // "none" | tostring' "$DIR/request.json" 2>/dev/null | head -c 64 | tr -cd 'A-Za-z0-9-') || id=none
-    to=$(jq -r '.version // "" | tostring' "$DIR/request.json" 2>/dev/null | head -c 32) || to=
-    stale=$(find "$DIR/request.json" -mmin +"$FRESH" 2>/dev/null || true)
-    rm -f "$DIR/request.json"
-    if [ -n "$stale" ]; then
+  jq -n --arg at "$(now)" --arg version "$VERSION" '{at: $at, version: $version}' | write "$DIR" updater.json
+  if { [ -e "$DIR/request.json" ] || [ -L "$DIR/request.json" ]; } && request=$(within "$DIR" take_request); then
+    age=$(printf '%s\n' "$request" | head -n 1); body=$(printf '%s\n' "$request" | tail -n +2)
+    id=$(printf '%s\n' "$body" | jq -r '.id // "none" | tostring' 2> /dev/null | head -c 64 | tr -cd 'A-Za-z0-9-'); [ -n "$id" ] || id=none
+    to=$(printf '%s\n' "$body" | jq -r '.version // "" | tostring' 2> /dev/null | head -c 32) || to=
+    if [ "$age" -gt $((FRESH * 60)) ]; then
       started=$(now); from=$(running_version); semver "$to" || to=invalid
       finish refused 'checking the request' "The request waited more than $FRESH minutes for the updater, so it wasn't carried out. Ask again."
     else

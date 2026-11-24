@@ -59,6 +59,10 @@
         {
           "type": "generic",
           "path": "example/docker-compose.yml"
+        },
+        {
+          "type": "generic",
+          "path": "README.md"
         }
       ]
     }
