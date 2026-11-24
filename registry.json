@@ -7,8 +7,9 @@
       "name": "ci-plan",
       "type": "registry:item",
       "title": "CI that tests a change by what it could break",
-      "description": "A script that decides which slow CI jobs a run needs from the files a pull request changes, with its own test cases, and the workflow that reads it: a push to main repeats nothing its pull request passed on the same commit, a release's pull request gets one real update, and every night everything runs. For a repository on GitHub Actions; its files go to the repo root",
+      "description": "A script that decides which slow CI jobs a run needs from the files a pull request changes, with its own test cases, and the workflow that reads it: a push to main repeats nothing its pull request passed on the same commit, a release's pull request gets one real update, and every night everything runs. For a repository on GitHub Actions; it installs upgrade-test too, which its workflow runs, and its files go to the repo root",
       "meta": { "root": true },
+      "registryDependencies": ["escalay/selfhost-kit/upgrade-test"],
       "files": [
         { "path": "parts/ci-plan/ci-plan.sh", "type": "registry:file", "target": "~/scripts/ci-plan.sh" },
         { "path": "parts/ci-plan/ci-plan.test.sh", "type": "registry:file", "target": "~/scripts/ci-plan.test.sh" },

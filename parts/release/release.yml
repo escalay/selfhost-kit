@@ -1,3 +1,4 @@
+# selfhost-kit release@1.2.0 # x-release-please-version
 # Releases of a self-hosted product, from escalay/selfhost-kit (part "release"). On main, release-please keeps a
 # release pull request open from the Conventional Commits since the last release, and this workflow starts that pull
 # request's checks. Merging it tags vX.Y.Z and drafts the GitHub Release. Every push to main also builds the image
@@ -130,7 +131,7 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
-      - name: Sign the image, and check the signature the way SECURITY.md tells people to
+      - name: Sign the image, and check its signature as anyone who installs it can
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
@@ -181,7 +182,7 @@ jobs:
             done
             # The two checks the updater makes before it installs a release, with its own cosign
             if [ "$CREATED" = "true" ]; then
-              updater=$(sed -n 's/^ *image: \(ghcr.io\/escalay\/updater:.*\)$/\1/p' deploy/compose/docker-compose.yml)
+              updater=$(sed -n 's/^ *image: \(ghcr.io\/escalay\/updater:[^ ]*\).*$/\1/p' deploy/compose/docker-compose.yml)
               signer="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main"
               head -n 1 "$provenance" > bundle.json
               docker run --rm -v "$PWD:/work" -w /work --entrypoint cosign "$updater" verify-blob-attestation \

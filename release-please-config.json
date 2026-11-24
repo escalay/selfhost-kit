@@ -63,6 +63,34 @@
         {
           "type": "generic",
           "path": "README.md"
+        },
+        {
+          "type": "generic",
+          "path": "SECURITY.md"
+        },
+        {
+          "type": "generic",
+          "path": "parts/ci-plan/ci-plan.sh"
+        },
+        {
+          "type": "generic",
+          "path": "parts/ci-plan/ci-plan.test.sh"
+        },
+        {
+          "type": "generic",
+          "path": "parts/ci-plan/ci.yml"
+        },
+        {
+          "type": "generic",
+          "path": "parts/upgrade-test/upgrade-test.sh"
+        },
+        {
+          "type": "generic",
+          "path": "parts/upgrade-test/upgrade-test.hooks.sh"
+        },
+        {
+          "type": "generic",
+          "path": "parts/release/release.yml"
         }
       ]
     }
