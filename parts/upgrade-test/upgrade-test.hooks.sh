@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selfhost-kit upgrade-test@1.2.0 # x-release-please-version
+# selfhost-kit upgrade-test@1.2.1 # x-release-please-version
 # What only your product knows, for scripts/upgrade-test.sh. This one is the kit's example app; replace each part.
 # shellcheck disable=SC2034,SC2154
 

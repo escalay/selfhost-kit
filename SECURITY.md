@@ -22,10 +22,10 @@ updater asks of the image that replaces it. Check one before you run it:
 
 <!-- x-release-please-start-version -->
 ```sh
-cosign verify ghcr.io/escalay/updater:1.2.0 \
+cosign verify ghcr.io/escalay/updater:1.2.1 \
   --certificate-identity https://github.com/escalay/selfhost-kit/.github/workflows/release.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-gh attestation verify oci://ghcr.io/escalay/updater:1.2.0 --repo escalay/selfhost-kit
+gh attestation verify oci://ghcr.io/escalay/updater:1.2.1 --repo escalay/selfhost-kit
 ```
 <!-- x-release-please-end -->
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selfhost-kit upgrade-test@1.2.0 # x-release-please-version
+# selfhost-kit upgrade-test@1.2.1 # x-release-please-version
 # Updates end to end, as an owner gets them, from escalay/selfhost-kit (part "upgrade-test"). A published release
 # runs from the compose file with data in it and is updated by the updater to the image under test, so its
 # migrations meet data an older version wrote. Then a newer version is asked for; then one that dies after migrating,

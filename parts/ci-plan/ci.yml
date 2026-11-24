@@ -1,4 +1,4 @@
-# selfhost-kit ci-plan@1.2.0 # x-release-please-version
+# selfhost-kit ci-plan@1.2.1 # x-release-please-version
 # CI for a self-hosted product, from escalay/selfhost-kit (part "ci-plan"). Every change is tested by what it could
 # break: scripts/ci-plan.sh decides which slow jobs a run needs, and scripts/ci-plan.test.sh holds that map to its
 # cases. A push to main repeats nothing its pull request already passed on the same commit, a release's pull request
